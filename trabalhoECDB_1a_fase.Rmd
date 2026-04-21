@@ -1,195 +1,197 @@
 ---
-title: "Trabalho Práico - Extração de Conhecimento de Dados Biológicos"
+title: "Trabalho Prático - Extração de Conhecimento de Dados Biológicos"
 author: "Diogo Barreira, Gonçalo Gomes, José Campos"
 date: "`r Sys.Date()`"
 output: html_document
 ---
-#1. Introdução
 
-Os dados utilizados  para o desenvolvimento do trabalho prático são provenientes do “The Cancer Genome Atlas” (TCGA), mais concretamente referentes ao carcinoma da tiróide (THCA) e foram consultados através do portal do National Cancer Institute. A escolha desta base de dados justifica-se pelo cancro da tiróide ser uma neoplasia endócrina muito comum (Wang et al., 2017; Du et al., 2021). Os autores acrescentam ainda que apesar de tipicamente os prognósticos serem bons, uma parte dos casos apresenta um comportamento muito agressivo. O TCGA-THCA permitiu que fossem identificados subtipos moleculares importantes, tais como perfis BRAF-like e RAS-like essenciais para a medicina de precisão (The Cancer Genome Atlas Research Network, 2014).
+# 1. Introdução
 
-#2. Os Dados:
+Os dados utilizados para o desenvolvimento do trabalho prático são provenientes do "The Cancer Genome Atlas" (TCGA), mais concretamente referentes ao carcinoma da tiróide (THCA) e foram consultados através do portal do National Cancer Institute. A escolha desta base de dados justifica-se pelo cancro da tiróide ser uma neoplasia endócrina muito comum (Wang et al., 2017; Du et al., 2021). Os autores acrescentam ainda que apesar de tipicamente os prognósticos serem bons, uma parte dos casos apresenta um comportamento muito agressivo. O TCGA-THCA permitiu que fossem identificados subtipos moleculares importantes, tais como perfis BRAF-like e RAS-like essenciais para a medicina de precisão (The Cancer Genome Atlas Research Network, 2014).
+
+# 2. Os Dados
 
 Os dados utilizados foram obtidos através do pacote TCGAbiolinks, que permite aceder diretamente ao repositório Genomic Data Commons (GDC).
 
-Projeto: TCGA-THCA
-Tipo de dados: expressão génica (RNA-Seq)
-Formato: contagens de leitura por gene
+- **Projeto:** TCGA-THCA  
+- **Tipo de dados:** expressão génica (RNA-Seq)  
+- **Formato:** contagens de leitura por gene  
 
 Estes dados são relevantes porque permitem comparar a expressão génica entre tumores e tecidos normais, possibilitando a identificação de genes associados ao desenvolvimento do cancro.
 
-#3. Carregamento e preparação dos dados:
-```{r}
+# 3. Carregamento e preparação dos dados
 
+```{r instalar-biocmanager}
 if (!require("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 BiocManager::install(version = "3.22", ask = FALSE, update = FALSE)
-
-
 ```
 
-```{r}
+```{r instalar-deps}
 BiocManager::install(c("GenomicFeatures", "AnnotationDbi"), ask = FALSE, update = FALSE)
 ```
-```{r}
+
+```{r instalar-tcga}
 BiocManager::install("TCGAbiolinks", ask = FALSE, update = FALSE)
 ```
 
-
-
-Bibliotecas a serem utilizadas:
-```{r}
+```{r bibliotecas, message=FALSE, warning=FALSE}
 library(BiocManager)
 library(TCGAbiolinks)
 library(SummarizedExperiment)
 ```
 
-
-```{r}
+```{r download-dados}
 query_thca <- GDCquery(
-    project = "TCGA-THCA",
+    project       = "TCGA-THCA",
     data.category = "Transcriptome Profiling",
-    data.type = "Gene Expression Quantification",
+    data.type     = "Gene Expression Quantification",
     workflow.type = "STAR - Counts"
 )
 
 GDCdownload(query_thca)
 
 data_thca <- GDCprepare(query_thca)
-
-#Nesta etapa, pretendemos descarregar os dados de expressão de genes.
+# Descarregamento e preparação dos dados de expressão génica.
 ```
 
-```{r}
+```{r extrair-matriz}
 exp_matrix <- assay(data_thca)
-
-#aqui extrai-se uma matriz de expressão onde as linhas vão representar os genes e as colunas representam as amostras.
+# Matriz de expressão: linhas = genes, colunas = amostras.
 ```
 
 ## 3.1 Dimensões do dataset
 
-```{r}
+```{r dimensoes-antes}
 cat("Dimensões antes da filtragem:", dim(exp_matrix), "\n")
 ```
 
 # 4. Pré-processamento dos dados
+
 ## 4.1 Filtragem de genes pouco expressos
 
-```{r}
-keep <- rowSums(exp_matrix > 10) >= 10
+```{r filtragem}
+keep         <- rowSums(exp_matrix > 10) >= 10
 exp_filtered <- exp_matrix[keep, ]
-
-#Aqui pretendemos remover os genes de baixa expressão.
+# Remoção dos genes de baixa expressão.
 ```
 
-##4.2 Dimensões após filtragem + distribuição dos grupos
+## 4.2 Dimensões após filtragem
 
-```{r}
+```{r dimensoes-depois}
 cat("Dimensões após filtragem:", dim(exp_filtered), "\n")
 ```
 
 ## 4.3 Transformação logarítmica
 
-```{r}
+```{r log-transform}
 exp_log <- log2(exp_filtered + 1)
-
-#Transformamos os dados através de log2, irá estabilizar a variância e tornar os dados mais adequados para realizar uma análise estatística.
+# Transformação log2 para estabilizar a variância e tornar os dados
+# mais adequados para análise estatística.
 ```
 
 # 5. Análise exploratória e estatística descritiva
+
 ## 5.1 Estatísticas básicas
 
-```{r}
-summary(exp_log)
-
-#recorrendo ao summary, conseguimos verificar os mínimos, máximos, média e quartis.
+```{r summary}
+summary(exp_log[, 1:5])
+# Mínimos, máximos, média e quartis das primeiras 5 amostras.
 ```
 
 ## 5.2 Visualização da distribuição
 
-```{r}
-hist(exp_matrix, main="Distribuição original", col="lightblue")
-hist(exp_log, main="Distribuição log2", col="lightgreen")
-
-#De acordo com os gráficos, é possível inferir que a logaritmização dos dados reduz a assimetria da distribuição.
+```{r histogramas}
+par(mfrow = c(1, 2))
+hist(as.numeric(exp_matrix[, 1:10]),
+     main = "Distribuição original", col = "lightblue",  xlab = "Contagens")
+hist(as.numeric(exp_log[, 1:10]),
+     main = "Distribuição log2",     col = "lightgreen", xlab = "log2(contagens + 1)")
+par(mfrow = c(1, 1))
+# A logaritmização reduz a assimetria da distribuição.
 ```
 
 ## 5.3 Boxplot das amostras
 
-```{r}
-boxplot(exp_log, main="Boxplot das amostras", las=2)
-
-#Este boxplot permite identificar diferenças entre a amostra e possíveis outliers.
+```{r boxplot, fig.width=14}
+boxplot(exp_log[, 1:30],
+        main     = "Boxplot das amostras (primeiras 30)",
+        las      = 2,
+        cex.axis = 0.6)
+# Permite identificar diferenças entre amostras e possíveis outliers.
 ```
 
 ## 5.4 Heatmap dos genes mais variáveis
 
-```{r}
+```{r heatmap}
 library(pheatmap)
-var_genes <- apply(exp_log, 1, var)
-top_var_genes <- names(sort(var_genes, decreasing=TRUE))[1:50]
+var_genes     <- apply(exp_log, 1, var)
+top_var_genes <- names(sort(var_genes, decreasing = TRUE))[1:50]
 
-pheatmap(exp_log[top_var_genes, ])
+pheatmap(exp_log[top_var_genes, ],
+         show_colnames = FALSE,
+         main          = "Heatmap - 50 genes mais variáveis")
 ```
 
-#6. Definição dos grupos
+# 6. Definição dos grupos
 
-```{r}
+```{r grupos}
 group <- ifelse(substr(colnames(exp_log), 14, 15) == "01", "Tumor", "Normal")
 table(group)
 ```
 
-As amostras são classificadas como:
-
-Tumor
-Normal
-
+As amostras são classificadas como **Tumor** ou **Normal** com base nas posições 14-15 do barcode TCGA.
 
 ## 6.1 PCA das amostras
-```{r}
+
+```{r pca}
 pca <- prcomp(t(exp_log), scale. = TRUE)
-plot(pca$x[,1], pca$x[,2],
+
+plot(pca$x[, 1], pca$x[, 2],
      col  = ifelse(group == "Tumor", "red", "blue"),
      pch  = 16,
-     xlab = paste0("PC1 (", round(summary(pca)$importance[2,1]*100, 1), "%)"),
-     ylab = paste0("PC2 (", round(summary(pca)$importance[2,2]*100, 1), "%)"),
+     xlab = paste0("PC1 (", round(summary(pca)$importance[2, 1] * 100, 1), "%)"),
+     ylab = paste0("PC2 (", round(summary(pca)$importance[2, 2] * 100, 1), "%)"),
      main = "PCA das amostras")
 legend("topright", legend = c("Tumor", "Normal"), col = c("red", "blue"), pch = 16)
 ```
 
-#7. Análise de expressão diferencial
+# 7. Análise de expressão diferencial
 
-```{r}
+```{r teste-t}
 p_values <- apply(exp_log, 1, function(gene) {
   t.test(gene ~ group)$p.value
-}) #Realiza-se um teste t para cada gene para comparar os dois grupos.
+})
+# Teste t para cada gene para comparar os dois grupos.
 
-p_adj <- p.adjust(p_values, method = "fdr")
-diff_genes <- which(p_adj < 0.05) #A correção FDR é utilizada para controlar falsos positivos.
+p_adj     <- p.adjust(p_values, method = "fdr")
+diff_genes <- which(p_adj < 0.05)
+# Correção FDR para controlar falsos positivos.
 ```
 
-#7.1 Contagem de DEGs e tabela top genes
-```{r}
+## 7.1 Contagem de DEGs
+
+```{r n-degs}
 cat("Genes diferencialmente expressos (FDR < 0.05):", length(diff_genes), "\n")
 ```
 
+## 7.2 Volcano plot
 
-##7.2 Volcano plot
-
-```{r}
+```{r volcano}
 logFC <- rowMeans(exp_log[, group == "Tumor"]) -
          rowMeans(exp_log[, group == "Normal"])
 
-plot(logFC, -log10(p_adj), pch=20, 
-     main="Volcano Plot",
-     xlab="Log Fold Change",
-     ylab="-log10(p-value)")
-#Este volcano plot foi utilizado para visualizar quais são os genes significativamente alterados.
+plot(logFC, -log10(p_adj),
+     pch  = 20,
+     main = "Volcano Plot",
+     xlab = "Log Fold Change",
+     ylab = "-log10(p-value)")
+# Visualização dos genes significativamente alterados.
 ```
 
-##7.3Tabela top DEGs 
+## 7.3 Tabela top DEGs
 
-```{r}
+```{r top-degs}
 top_degs <- data.frame(
   logFC = logFC[diff_genes],
   p_adj = p_adj[diff_genes]
@@ -197,41 +199,45 @@ top_degs <- data.frame(
 head(top_degs[order(top_degs$p_adj), ], 20)
 ```
 
-#8. Análise de enriquecimento funcional
-```{r}
-genes <- rownames(exp_log)[diff_genes]
+# 8. Análise de enriquecimento funcional
 
+```{r limpeza-ids}
+genes       <- rownames(exp_log)[diff_genes]
 genes_clean <- sub("\\..*", "", genes)
-
-head(genes_clean) # Limpeza dos Ids
+head(genes_clean)
+# Limpeza dos IDs ENSEMBL (remoção de sufixos de versão).
 ```
 
-```{r}
+```{r enriquecimento, message=FALSE, warning=FALSE}
 library(clusterProfiler)
 library(org.Hs.eg.db)
 
 entrez_ids <- bitr(
   genes_clean,
   fromType = "ENSEMBL",
-  toType = "ENTREZID",
-  OrgDb = org.Hs.eg.db
+  toType   = "ENTREZID",
+  OrgDb    = org.Hs.eg.db
 )
 
-genes <- rownames(exp_log)[diff_genes]
-
 ego <- enrichGO(
-  gene = entrez_ids$ENTREZID,
-  OrgDb = org.Hs.eg.db,
-  ont = "BP",
+  gene          = entrez_ids$ENTREZID,
+  OrgDb         = org.Hs.eg.db,
+  ont           = "BP",
   pAdjustMethod = "BH",
-  pvalueCutoff = 0.05
+  pvalueCutoff  = 0.05
 )
 
 dotplot(ego, showCategory = 10)
-
-#o "enrich" tem como finalidade averiguar os processos biológicos enriquecidos nos genes diferencialmente expressos.
+# Processos biológicos enriquecidos nos genes diferencialmente expressos.
 ```
 
-Foi necessário converter os identificadores ENSEMBL para ENTREZID e remover sufixos de versão, uma vez que ferramentas de enriquecimento funcional requerem formatos específicos de identificação génica.
+Foi necessário converter os identificadores ENSEMBL para ENTREZID e remover sufixos de versão, uma vez que ferramentas de enriquecimento funcional requerem formatos específicos de identificação génica. Aproximadamente 24.76% dos genes não foram convertidos para ENTREZ ID, resultado esperado devido a limitações nas bases de dados e diferenças na anotação génica.
 
-Aproximadamente 24.76% dos genes não foram convertidos para ENTREZ ID. Isto é um resultado esperado devido a limitações nas bases de dados e diferenças na anotação genética.
+# 9. Guardar dados para a Fase 2
+
+```{r guardar-dados}
+# IMPORTANTE: guarda o objeto SummarizedExperiment para ser carregado na fase 2.
+# O ficheiro será criado na mesma pasta deste .Rmd.
+saveRDS(data_thca, file = "dados_thca.rds")
+cat("Ficheiro 'dados_thca.rds' guardado com sucesso.\n")
+```
