@@ -340,7 +340,7 @@ Foram obtidas previsões para o conjunto de teste.
 ```{r}
 pred_prob <- predict(model_log, newdata = as.data.frame(X_test), type = "response")
 pred_class <- ifelse(pred_prob > 0.5, levels(y)[2], levels(y)[1])
-pred_class <- as.factor(pred_class)
+pred_class <- factor(pred_class, levels = levels(y))
 ```
 
 A avaliação do modelo foi realizada através da matriz de confusão.
