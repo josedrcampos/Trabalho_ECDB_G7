@@ -1,296 +1,479 @@
 ---
-title: "Trabalho Prático - Extração de Conhecimento de Dados Biológicos"
+title: "Extração de Conhecimento de Dados Biológicos - Trabalho 1"
 author: "Diogo Barreira, Gonçalo Gomes, José Campos"
-date: "`r Sys.Date()`"
+date: "2026-04-30"
 output: html_document
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE
+)
+```
+
 # 1. Introdução
 
-Os dados utilizados para o desenvolvimento do trabalho prático são provenientes do "The Cancer Genome Atlas" (TCGA), mais concretamente referentes ao carcinoma da tiróide (THCA) e foram consultados através do portal do National Cancer Institute. A escolha desta base de dados justifica-se pelo cancro da tiróide ser uma neoplasia endócrina muito comum (Wang et al., 2017; Du et al., 2021). Os autores acrescentam ainda que apesar de tipicamente os prognósticos serem bons, uma parte dos casos apresenta um comportamento muito agressivo. O TCGA-THCA permitiu que fossem identificados subtipos moleculares importantes, tais como perfis BRAF-like e RAS-like essenciais para a medicina de precisão (The Cancer Genome Atlas Research Network, 2014).
+O crescimento exponencial de dados biológicos, impulsionado por tecnologias de sequenciação de nova geração (NGS), tem permitido estudar sistemas biológicos a uma escala sem precedentes. Entre estes, os dados de expressão genética obtidos por RNA sequencing (RNA-seq) são particularmente relevantes, uma vez que permitem quantificar os níveis de atividade dos genes em diferentes condições biológicas.
 
-# 2. Os Dados
+Neste trabalho, foi analisado um conjunto de dados de expressão genética relativo ao carcinoma da tiroide (THCA), proveniente de bases de dados públicas como o The Cancer Genome Atlas (TCGA). Este conjunto contém medições de expressão para dezenas de milhares de genes em centenas de amostras, bem como metadados clínicos e fenotípicos associados.
 
-Os dados utilizados foram obtidos através do pacote TCGAbiolinks, que permite aceder diretamente ao repositório Genomic Data Commons (GDC).
+O principal objetivo consiste na exploração e análise destes dados, incluindo a identificação de padrões relevantes, a redução da dimensionalidade, a identificação de genes diferencialmente expressos e a construção de modelos preditivos capazes de classificar amostras com base nos seus perfis de expressão genética.
 
-- **Projeto:** TCGA-THCA  
-- **Tipo de dados:** expressão génica (RNA-Seq)  
-- **Formato:** contagens de leitura por gene  
+Para tal, foram utilizadas ferramentas do ambiente R, nomeadamente estruturas de dados especializadas como o `SummarizedExperiment`, bem como métodos estatísticos e de aprendizagem automática adequados à análise de dados ómicos de alta dimensão.
 
-Estes dados são relevantes porque permitem comparar a expressão génica entre tumores e tecidos normais, possibilitando a identificação de genes associados ao desenvolvimento do cancro.
+```{r}
+dados <- readRDS("dados_thca.rds")
+dados
 
-# 3. Carregamento e preparação dos dados
+class(dados)
+```
 
-```{r setup, message=FALSE, warning=FALSE}
+# 2. Carregamento e Estrutura dos Dados
+
+## 2.1 Extração da matriz de expressão e metadados
+
+O conjunto de dados encontra-se armazenado num objeto do tipo `RangedSummarizedExperiment`, que integra diferentes componentes relevantes para a análise de dados de RNA-seq. Foi selecionada a matriz de expressão FPKM-UQ (unstranded), por corresponder a uma medida normalizada adequada para comparação entre amostras.
+
+```{r}
 library(SummarizedExperiment)
-library(DESeq2)
-library(pheatmap)
-library(clusterProfiler)
-library(org.Hs.eg.db)
+
+expr <- assay(dados, "fpkm_uq_unstrand")
+meta <- as.data.frame(colData(dados))
+
+dim(expr)
+dim(meta)
 ```
 
-```{r carregar-dados}
-# Carregar dados previamente obtidos e guardados no final da fase 1 com saveRDS()
-# Garante que o ficheiro está na mesma pasta que este .Rmd, ou ajusta o caminho
-data_thca <- readRDS("dados_thca.rds")
+A matriz `expr` contém os níveis de expressão dos genes nas diferentes amostras, enquanto `meta` armazena a informação clínica e experimental relevante para as etapas seguintes.
 
-exp_matrix <- assay(data_thca)
-# As linhas representam genes e as colunas representam amostras.
+## 2.2 Dimensões dos dados
+
+A matriz de expressão apresenta `r nrow(expr)` genes e `r ncol(expr)` amostras, enquanto os metadados descrevem essas mesmas amostras através de `r ncol(meta)` variáveis clínicas e experimentais.
+
+Esta configuração é característica de dados ómicos, nos quais o número de variáveis (genes) supera largamente o número de observações (amostras), o que implica a necessidade de técnicas de redução de dimensionalidade e seleção de características nas etapas seguintes.
+
+## 2.3 Identificação da variável de interesse
+
+```{r}
+unique(meta$sample_type)
 ```
 
-## 3.1 Dimensões do dataset
+A variável `sample_type` apresenta duas categorias principais: *Primary Tumor* e *Solid Tissue Normal*, correspondendo, respetivamente, a amostras tumorais e de tecido normal. Esta distinção define um problema de classificação binária, que será explorado nas etapas seguintes.
 
-```{r dimensoes-antes}
-cat("Dimensões antes da filtragem:", dim(exp_matrix), "\n")
+# 3. Análise Exploratória dos Dados
+
+A análise exploratória tem como objetivo compreender a estrutura, distribuição e possíveis padrões dos dados de expressão genética antes da aplicação de métodos mais avançados.
+
+## 3.1 Distribuição dos dados
+
+Para visualizar a distribuição dos valores de expressão, foram selecionados os 10 genes com maior variância. A utilização de todos os genes tornaria a representação gráfica pouco legível, pelo que este subconjunto oferece uma perspetiva representativa da dispersão dos dados.
+
+```{r}
+vars <- apply(expr, 1, var)
+
+genes_sample <- order(vars, decreasing = TRUE)[1:10]
+
+boxplot(t(expr[genes_sample, ]),
+        main = "Distribuição dos níveis de expressão (genes mais variáveis)",
+        las = 2)
 ```
 
-# 4. Pré-processamento dos dados
+Os boxplots revelam distribuições fortemente assimétricas, com valores concentrados em níveis baixos e caudas longas associadas a valores elevados, bem como numerosos outliers. Estas características são típicas de dados de RNA-seq e evidenciam a necessidade de transformação prévia dos dados.
 
-## 4.1 Filtragem de genes pouco expressos
+## 3.2 Transformação logarítmica
 
-```{r filtragem}
-keep         <- rowSums(exp_matrix > 10) >= 10
-exp_filtered <- exp_matrix[keep, ]
-# Remoção dos genes de baixa expressão.
+Foi aplicada uma transformação log2(x + 1) aos valores de expressão, de forma a reduzir o impacto de valores extremos, estabilizar a variância e aproximar a distribuição da normalidade.
+
+```{r}
+expr_log <- log2(expr + 1)
 ```
 
-## 4.2 Dimensões após filtragem
+## 3.3 Comparação entre grupos
 
-```{r dimensoes-depois}
-cat("Dimensões após filtragem:", dim(exp_filtered), "\n")
+A distribuição das amostras pelos dois grupos é a seguinte:
+
+```{r}
+table(meta$sample_type)
 ```
 
-## 4.3 Transformação logarítmica
+Para ilustrar diferenças nos níveis de expressão, compararam-se os três genes mais variáveis entre os grupos tumoral e normal.
 
-```{r log-transform}
-exp_log <- log2(exp_filtered + 1)
-# Transformação log2 para estabilizar a variância e tornar os dados
-# mais adequados para análise estatística exploratória.
+```{r}
+genes_exemplo <- genes_sample[1:3]
+
+par(mfrow = c(1, 3))
+
+for (g in genes_exemplo) {
+  boxplot(expr_log[g, ] ~ meta$sample_type,
+          col = c("red", "blue"),
+          main = paste("Gene", g))
+}
 ```
 
-# 5. Análise exploratória e estatística descritiva
+Os gráficos revelam diferenças nos níveis de expressão entre os dois grupos, embora com sobreposição considerável, indicando que a separação entre classes não é linear quando se consideram poucos genes isoladamente. Estes resultados motivam a identificação sistemática de genes diferencialmente expressos.
 
-## 5.1 Estatísticas básicas
+## 3.4 Análise de Componentes Principais (PCA)
 
-```{r summary}
-# Resumo das primeiras 5 amostras para não sobrecarregar o output
-summary(exp_log[, 1:5])
-```
+Foi aplicada uma análise de componentes principais (PCA) para explorar a estrutura global dos dados num espaço de menor dimensão (Lever et al., 2017).
 
-## 5.2 Visualização da distribuição
+```{r}
+expr_clean <- expr_log
+expr_clean[!is.finite(expr_clean)] <- NA
+expr_clean <- expr_clean[complete.cases(expr_clean), ]
 
-```{r histogramas}
-par(mfrow = c(1, 2))
-hist(as.numeric(exp_matrix[, 1:10]),
-     main = "Distribuição original", col = "lightblue",  xlab = "Contagens")
-hist(as.numeric(exp_log[, 1:10]),
-     main = "Distribuição log2",     col = "lightgreen", xlab = "log2(contagens + 1)")
-par(mfrow = c(1, 1))
-# A logaritmização reduz a assimetria da distribuição.
-```
+vars <- apply(expr_clean, 1, var)
+expr_clean <- expr_clean[vars > 0, ]
 
-## 5.3 Boxplot das amostras
-
-```{r boxplot, fig.width=14}
-boxplot(exp_log[, 1:30],
-        main     = "Boxplot das amostras (primeiras 30)",
-        las      = 2,
-        cex.axis = 0.6)
-# Permite identificar diferenças entre amostras e possíveis outliers.
-```
-
-## 5.4 Heatmap dos genes mais variáveis
-
-```{r heatmap-exploratorio}
-var_genes     <- apply(exp_log, 1, var)
-top_var_genes <- names(sort(var_genes, decreasing = TRUE))[1:50]
-
-pheatmap(exp_log[top_var_genes, ],
-         show_colnames = FALSE,
-         main          = "Heatmap - 50 genes mais variáveis")
-```
-
-# 6. Definição dos grupos
-
-```{r grupos}
-group <- ifelse(substr(colnames(exp_log), 14, 15) == "01", "Tumor", "Normal")
-group <- factor(group)
-table(group)
-```
-
-As amostras são classificadas como **Tumor** ou **Normal** com base nas posições 14-15 do barcode TCGA.
-
-## 6.1 PCA das amostras
-
-```{r pca}
-pca <- prcomp(t(exp_log), scale. = TRUE)
+pca <- prcomp(t(expr_clean), scale = TRUE)
 
 plot(pca$x[, 1], pca$x[, 2],
-     col  = ifelse(group == "Tumor", "red", "blue"),
-     pch  = 16,
-     xlab = paste0("PC1 (", round(summary(pca)$importance[2, 1] * 100, 1), "%)"),
-     ylab = paste0("PC2 (", round(summary(pca)$importance[2, 2] * 100, 1), "%)"),
+     col = as.factor(meta$sample_type),
+     pch = 19,
+     xlab = "PC1",
+     ylab = "PC2",
      main = "PCA das amostras")
-legend("topright", legend = c("Tumor", "Normal"), col = c("red", "blue"), pch = 16)
+
+legend("topright",
+       legend = levels(as.factor(meta$sample_type)),
+       col = 1:2,
+       pch = 19)
 ```
 
-A análise PCA foi utilizada para reduzir a dimensionalidade dos dados, permitindo identificar padrões globais. Observa-se uma separação entre amostras tumorais e normais, indicando diferenças na expressão génica entre os grupos.
+```{r}
+var_explained <- (pca$sdev)^2
+var_explained <- var_explained / sum(var_explained)
 
-# 7. Análise de expressão diferencial
-
-## 7.1 Preparação dos dados para DESeq2
-
-```{r deseq2-prep, message=FALSE}
-# DESeq2 exige contagens inteiras — usa exp_filtered (não log2)
-coldata <- data.frame(
-  row.names = colnames(exp_filtered),
-  condition = group
+pca_df <- data.frame(
+  PC         = paste0("PC", 1:10),
+  Variance   = round(var_explained[1:10], 3),
+  Cumulative = round(cumsum(var_explained[1:10]), 3)
 )
+
+pca_df
+```
+
+O PC1 explica `r round(var_explained[1] * 100, 1)`% da variabilidade total, enquanto o PC2 explica `r round(var_explained[2] * 100, 1)`%. Em conjunto, os dois primeiros componentes capturam `r round(sum(var_explained[1:2]) * 100, 1)`% da variabilidade.
+
+A projeção revela uma tendência de separação entre amostras tumorais e normais, particularmente ao longo do PC2. As amostras normais encontram-se mais concentradas numa região específica, enquanto as tumorais apresentam maior dispersão, sugerindo heterogeneidade biológica no grupo tumoral. A sobreposição parcial indica que a separação completa requer mais do que duas dimensões.
+
+# 4. Análise de Expressão Diferencial
+
+A análise de expressão diferencial tem como objetivo identificar genes cujos níveis de expressão diferem significativamente entre amostras tumorais e normais. Foi utilizado o pacote DESeq2, que modela os dados de contagem e estima fold changes de forma estatisticamente robusta (Love et al., 2014).
+
+## 4.1 Preparação dos dados
+
+O DESeq2 requer dados de contagem brutos (não normalizados), pelo que foi selecionada a matriz `unstranded`.
+
+```{r}
+assayNames(dados)
+```
+
+```{r}
+counts <- assay(dados, "unstranded")
+```
+
+## 4.2 Execução da análise
+
+Foi criado um objeto `DESeqDataSet` com a variável de interesse `sample_type`, distinguindo tecido tumoral de tecido normal.
+
+```{r}
+library(DESeq2)
 
 dds <- DESeqDataSetFromMatrix(
-  countData = round(exp_filtered),  # arredondar para garantir inteiros
-  colData   = coldata,
-  design    = ~ condition
+  countData = counts,
+  colData   = meta,
+  design    = ~ sample_type
 )
+```
 
+```{r}
 dds <- DESeq(dds)
+res <- results(dds)
 ```
 
-```{r vsd}
-# Transformação VSD para análises downstream (clustering, heatmaps)
-vsd     <- varianceStabilizingTransformation(dds, blind = FALSE)
-exp_vsd <- assay(vsd)
+## 4.3 Resultados
+
+```{r}
+summary(res)
 ```
 
-## 7.2 Resultados e contagem de DEGs
-
-```{r deseq2-results}
-res        <- results(dds, contrast = c("condition", "Tumor", "Normal"))
-resOrdered <- res[order(res$padj), ]
-
-n_sig <- sum(res$padj < 0.05, na.rm = TRUE)
-cat("Genes diferencialmente expressos (FDR < 0.05):", n_sig, "\n")
+```{r}
+res_sig <- res[which(res$padj < 0.05), ]
+nrow(res_sig)
 ```
 
-## 7.3 MA plot e Volcano plot
+```{r}
+head(res[order(res$padj), ])
+```
 
-```{r maplot-volcano, fig.width=12}
-par(mfrow = c(1, 2))
+Identificaram-se `r nrow(res_sig)` genes com diferenças estatisticamente significativas entre os dois grupos (padj < 0.05), evidenciando uma expressão diferencial marcada entre tecido tumoral e normal.
 
-# MA plot
-plotMA(res, main = "MA plot - DESeq2", ylim = c(-5, 5))
+## 4.4 Visualização
 
-# Volcano plot — variáveis extraídas dos resultados DESeq2
-logFC <- res$log2FoldChange
-pval  <- res$padj
+O MA plot representa a relação entre a média de expressão e a magnitude da diferença entre condições. Os pontos coloridos correspondem a genes com diferenças estatisticamente significativas.
 
-plot(logFC, -log10(pval),
-     pch  = 16, cex = 0.5,
-     col  = ifelse(!is.na(pval) & pval < 0.05, "red", "grey"),
+```{r}
+plotMA(res, main = "MA Plot", ylim = c(-5, 5))
+```
+
+O Volcano plot combina a magnitude das alterações (log2 fold change) com a sua significância estatística. Os pontos coloridos assinalam genes com padj < 0.05 e |log2FC| > 1.
+
+```{r}
+res_df <- as.data.frame(res)
+res_df$color <- "ns"
+res_df$color[res_df$padj < 0.05 & res_df$log2FoldChange >  1] <- "up"
+res_df$color[res_df$padj < 0.05 & res_df$log2FoldChange < -1] <- "down"
+
+plot(res_df$log2FoldChange,
+     -log10(res_df$pvalue),
+     col  = c(ns = "grey", up = "red", down = "blue")[res_df$color],
+     pch  = 20,
+     main = "Volcano Plot",
      xlab = "log2 Fold Change",
-     ylab = "-log10(padj)",
-     main = "Volcano plot")
-abline(h = -log10(0.05), col = "blue", lty = 2)
+     ylab = "-log10(p-value)")
 
-par(mfrow = c(1, 1))
+legend("topright",
+       legend = c("Up", "Down", "NS"),
+       col    = c("red", "blue", "grey"),
+       pch    = 20)
 ```
 
-A análise de expressão diferencial foi realizada com o pacote DESeq2, que modela diretamente dados de contagem utilizando uma distribuição binomial negativa, permitindo uma estimativa robusta da variabilidade entre amostras. Foram identificados genes diferencialmente expressos entre tumor e normal (FDR < 0.05). O MA plot e o volcano plot permitem observar a magnitude das alterações de expressão e a sua significância estatística.
+# 5. Modelos Preditivos
 
-## 7.4 Tabela top DEGs
+Nesta secção foram construídos modelos de aprendizagem supervisionada para classificar amostras entre tecido tumoral e normal.
 
-```{r top-degs}
-top_degs <- as.data.frame(
-  resOrdered[!is.na(resOrdered$padj) & resOrdered$padj < 0.05, ]
+## 5.1 Preparação dos dados
+
+Para reduzir a dimensionalidade e focar nos genes mais informativos, foram selecionados os 50 genes com menor p-value ajustado na análise de expressão diferencial.
+
+```{r}
+expr_ml <- expr_log
+expr_ml[!is.finite(expr_ml)] <- NA
+expr_ml <- expr_ml[complete.cases(expr_ml), ]
+
+top_genes <- rownames(res)[order(res$padj)][1:50]
+top_genes <- intersect(top_genes, rownames(expr_ml))
+
+X <- t(expr_ml[top_genes, ])
+y <- factor(make.names(meta$sample_type))
+```
+
+Os dados foram divididos em conjuntos de treino (70%) e teste (30%), garantindo uma avaliação independente do desempenho dos modelos.
+
+```{r}
+set.seed(123)
+train_idx <- sample(1:nrow(X), 0.7 * nrow(X))
+
+X_train <- X[train_idx, ]
+X_test  <- X[-train_idx, ]
+
+y_train <- y[train_idx]
+y_test  <- y[-train_idx]
+```
+
+## 5.2 Regressão logística (baseline)
+
+Como modelo inicial, foi utilizada regressão logística — um método clássico de classificação binária que serve de baseline para comparação com abordagens mais avançadas (Hosmer et al., 2013).
+
+```{r}
+model_log <- glm(y_train ~ ., data = as.data.frame(X_train), family = binomial)
+```
+
+```{r}
+pred_prob  <- predict(model_log, newdata = as.data.frame(X_test), type = "response")
+pred_class <- ifelse(pred_prob > 0.5, levels(y)[2], levels(y)[1])
+pred_class <- factor(pred_class, levels = levels(y))
+```
+
+## 5.3 Modelos com validação cruzada (caret)
+
+Para uma avaliação mais robusta, os modelos foram também treinados com o pacote `caret`, incorporando validação cruzada de 5 folds (Kuhn, 2008).
+
+```{r}
+library(caret)
+
+ctrl <- trainControl(method = "cv", number = 5)
+```
+
+### Regressão logística
+
+```{r}
+model_caret_log <- train(X_train, y_train,
+                         method    = "glm",
+                         family    = "binomial",
+                         trControl = ctrl)
+```
+
+### k-Nearest Neighbors (kNN)
+
+O kNN é uma abordagem não paramétrica que classifica cada amostra com base na proximidade às amostras de treino no espaço de características (Cover & Hart, 1967).
+
+```{r}
+model_knn <- train(X_train, y_train,
+                   method    = "knn",
+                   trControl = ctrl)
+```
+
+```{r}
+pred_log_caret <- predict(model_caret_log, X_test)
+pred_knn       <- predict(model_knn, X_test)
+```
+
+## 5.4 Avaliação dos modelos
+
+A avaliação recorreu à matriz de confusão e a três métricas complementares: accuracy (proporção global de classificações corretas), sensibilidade (capacidade de identificar amostras tumorais) e especificidade (capacidade de identificar amostras normais). Dado o desbalanceamento entre classes, a análise conjunta destas métricas é essencial para evitar conclusões baseadas exclusivamente na accuracy.
+
+### Regressão logística (manual)
+
+```{r}
+conf_log_manual <- table(Predicted = pred_class, Actual = y_test)
+conf_log_manual
+```
+
+```{r}
+accuracy_log_manual <- mean(pred_class == y_test)
+
+TP <- conf_log_manual[1, 1]
+TN <- conf_log_manual[2, 2]
+FP <- conf_log_manual[1, 2]
+FN <- conf_log_manual[2, 1]
+
+sensitivity_log_manual <- TP / (TP + FN)
+specificity_log_manual <- TN / (TN + FP)
+
+accuracy_log_manual
+sensitivity_log_manual
+specificity_log_manual
+```
+
+---
+
+### Regressão logística (caret)
+
+```{r}
+conf_log_caret <- table(Predicted = pred_log_caret, Actual = y_test)
+conf_log_caret
+```
+
+```{r}
+accuracy_log_caret <- mean(pred_log_caret == y_test)
+
+TP <- conf_log_caret[1, 1]
+TN <- conf_log_caret[2, 2]
+FP <- conf_log_caret[1, 2]
+FN <- conf_log_caret[2, 1]
+
+sensitivity_log_caret <- TP / (TP + FN)
+specificity_log_caret <- TN / (TN + FP)
+
+accuracy_log_caret
+sensitivity_log_caret
+specificity_log_caret
+```
+
+---
+
+### k-Nearest Neighbors (kNN)
+
+```{r}
+conf_knn <- table(Predicted = pred_knn, Actual = y_test)
+conf_knn
+```
+
+```{r}
+accuracy_knn <- mean(pred_knn == y_test)
+
+TP <- conf_knn[1, 1]
+TN <- conf_knn[2, 2]
+FP <- conf_knn[1, 2]
+FN <- conf_knn[2, 1]
+
+sensitivity_knn <- TP / (TP + FN)
+specificity_knn <- TN / (TN + FP)
+
+accuracy_knn
+sensitivity_knn
+specificity_knn
+```
+
+### Comparação global
+
+```{r}
+results <- data.frame(
+  Model       = c("Logistic (manual)", "Logistic (caret)", "kNN"),
+  Accuracy    = c(accuracy_log_manual, accuracy_log_caret, accuracy_knn),
+  Sensitivity = c(sensitivity_log_manual, sensitivity_log_caret, sensitivity_knn),
+  Specificity = c(specificity_log_manual, specificity_log_caret, specificity_knn)
 )
-head(top_degs[order(top_degs$padj), c("log2FoldChange", "padj")], 20)
+
+results
 ```
 
-# 8. Análise de enriquecimento funcional
+Os modelos de regressão logística — manual e com `caret` — apresentam resultados praticamente idênticos, com elevada accuracy, sensibilidade e especificidade. A semelhança entre as duas versões sugere que a validação cruzada não introduziu melhorias expressivas, o que é consistente com um problema de classificação bem estruturado.
 
-```{r enriquecimento-prep}
-# Genes significativos
-sig_genes   <- rownames(res)[!is.na(res$padj) & res$padj < 0.05]
-genes_clean <- sub("\\..*", "", sig_genes)  # remover sufixos de versão ENSEMBL
-head(genes_clean)
+O kNN apresenta desempenho ligeiramente inferior, sobretudo ao nível da especificidade, refletindo uma menor capacidade de identificar corretamente amostras normais. Ainda assim, mantém sensibilidade elevada, evidenciando uma boa deteção de amostras tumorais.
+
+De forma geral, todos os modelos demonstram forte capacidade de discriminação entre os dois grupos, em consonância com os padrões identificados na análise exploratória e de expressão diferencial.
+
+## 5.5 Comparação entre análise diferencial e modelos preditivos
+
+Para avaliar a consistência entre abordagens, foi comparado o conjunto de genes diferencialmente expressos com os genes mais importantes identificados pelo modelo preditivo.
+
+```{r}
+imp <- varImp(model_caret_log)$importance
+top_de <- rownames(res)[order(res$padj)][1:50]
+top_de_clean <- sub("\\..*", "", top_de)
+
+top_ml <- rownames(imp)[order(-imp$Overall)][1:20]
+top_ml_clean <- sub("\\..*", "", top_ml)
+
+common_genes <- intersect(top_de_clean, top_ml_clean)
 ```
 
-```{r enriquecimento-go, message=FALSE, warning=FALSE}
-entrez_ids <- bitr(
-  genes_clean,
-  fromType = "ENSEMBL",
-  toType   = "ENTREZID",
-  OrgDb    = org.Hs.eg.db
-)
-
-ego <- enrichGO(
-  gene          = entrez_ids$ENTREZID,
-  OrgDb         = org.Hs.eg.db,
-  ont           = "BP",
-  pAdjustMethod = "BH",
-  pvalueCutoff  = 0.05
-)
-
-dotplot(ego, showCategory = 10, title = "Enriquecimento GO - Processos Biológicos")
+```{r}
+common_genes
+length(common_genes)
 ```
 
-Foi necessário converter os identificadores ENSEMBL para ENTREZID e remover sufixos de versão, uma vez que ferramentas de enriquecimento funcional requerem formatos específicos de identificação génica. É esperado que uma fração dos genes não seja convertida devido a limitações nas bases de dados e diferenças na anotação génica.
+Observa-se uma coincidência total entre os genes mais relevantes identificados pelas duas abordagens, confirmando que os genes com maior significância estatística são também aqueles com maior contribuição para a classificação. Esta convergência reforça a robustez dos resultados e indica que as diferenças entre amostras tumorais e normais são suficientemente marcadas para permitir classificação eficaz com um conjunto reduzido de genes.
 
-# 9. Análise não supervisionada
+### Conversão de identificadores ENSEMBL para SYMBOL
 
-## 9.1 Clustering hierárquico das amostras
+```{r}
+library(org.Hs.eg.db)
+library(clusterProfiler)
 
-```{r clustering-hierarquico, fig.width=12}
-dist_mat <- dist(t(exp_vsd))
-hc       <- hclust(dist_mat, method = "ward.D2")
+gene_symbols <- bitr(common_genes,
+                     fromType = "ENSEMBL",
+                     toType   = "SYMBOL",
+                     OrgDb    = "org.Hs.eg.db")
 
-plot(hc,
-     main   = "Clustering hierárquico das amostras",
-     labels = FALSE,
-     xlab   = "Amostras",
-     sub    = "")
-
-clusters <- cutree(hc, k = 2)
-cat("\nCorrespondência clusters vs grupos biológicos:\n")
-print(table(Cluster = clusters, Grupo = group))
+gene_symbols
 ```
 
-O clustering hierárquico agrupa as amostras com base na similaridade dos perfis de expressão génica. A correspondência entre os clusters obtidos e os grupos biológicos (tumor/normal) indica consistência nos dados e valida a separação observada na PCA.
+# 6. Interpretação dos Biomarcadores Identificados
 
-## 9.2 Heatmap com anotação de grupos
+A assinatura genética obtida — composta por genes como ETV4, CDH3, LIPH, RXRG, SRCIN1 e ZCCHC12 — reflete processos biológicos cruciais na progressão do carcinoma da tiróide.
 
-```{r heatmap-anotado}
-var_genes_vsd <- apply(exp_vsd, 1, var)
-top_genes     <- names(sort(var_genes_vsd, decreasing = TRUE))[1:50]
+ETV4 e ZCCHC12 surgem como reguladores centrais frequentemente associados à ativação da via MAPK, um evento determinante no desenvolvimento de carcinomas papilares da tiróide (PTC) (Orlopp et al., 2022). CDH3 (P-caderina) e SRCIN1 apontam para uma reprogramação da adesão celular e do citoesqueleto, facilitando a motilidade e o potencial invasivo do tumor (He et al., 2012). LIPH destaca a importância da reprogramação do metabolismo lipídico no microambiente tumoral, enquanto RXRG sugere alterações nos processos de diferenciação celular e resposta a retinóides, fundamentais para a homeostase folicular (Aoki et al., 2007).
 
-annotation <- data.frame(Grupo = group)
-rownames(annotation) <- colnames(exp_vsd)
+A integração de métodos estatísticos e de aprendizagem automática permitiu isolar uma assinatura molecular com elevada relevância biológica, que não só distingue eficazmente as amostras como também mapeia os principais eixos da oncogénese tiroideia.
 
-pheatmap(exp_vsd[top_genes, ],
-         annotation_col = annotation,
-         show_rownames  = FALSE,
-         show_colnames  = FALSE,
-         main           = "Heatmap - 50 genes mais variáveis (VSD)")
-```
+# 7. Referências
 
-O heatmap permite visualizar padrões de expressão génica nos 50 genes mais variáveis e verificar a separação entre os grupos de amostras. A anotação por cor facilita a identificação visual dos grupos tumorais e normais.
+Aoki, J., Inoue, A., & Makide, K. (2007). Membrane-bound phosphatidic acid-selective phospholipase A1 (mPA-PLA1; LIPH) and its role in lipid signaling. *Journal of Biochemistry*, 142(2), 143–149. https://doi.org/10.1093/jb/mvm131
 
-## 9.3 MDS (Multidimensional Scaling)
+Cover, T., & Hart, P. (1967). Nearest neighbor pattern classification. *IEEE Transactions on Information Theory*, 13(1), 21–27. https://doi.org/10.1109/TIT.1967.1053964
 
-```{r mds}
-mds <- cmdscale(dist_mat, k = 2)
+He, H., Liyanarachchi, S., Akagi, K., Nagy, R., Li, J., Huang, Y., & de la Chapelle, A. (2012). ZCCHC12 is a novel coactivator in the transcriptional complex of thyroid carcinogenesis. *Journal of Biological Chemistry*, 287(35), 29336–29345. https://doi.org/10.1074/jbc.M112.355156
 
-plot(mds[, 1], mds[, 2],
-     col  = ifelse(group == "Tumor", "red", "blue"),
-     pch  = 16,
-     xlab = "Dimensão 1",
-     ylab = "Dimensão 2",
-     main = "MDS das amostras")
-legend("topright", legend = c("Tumor", "Normal"), col = c("red", "blue"), pch = 16)
-```
+Hosmer, D. W., Jr., Lemeshow, S., & Sturdivant, R. X. (2013). *Applied logistic regression* (3rd ed.). John Wiley & Sons.
 
-O MDS é uma técnica de redução de dimensionalidade que preserva as distâncias entre amostras no espaço original. Tal como na PCA, observa-se uma separação entre amostras tumorais e normais, confirmando a existência de perfis de expressão génica distintos entre os dois grupos.
+Kuhn, M. (2008). Building predictive models in R using the caret package. *Journal of Statistical Software*, 28(5), 1–26. https://doi.org/10.18637/jss.v028.i05
 
-## 9.4 Interpretação global das análises não supervisionadas
+Lever, J., Krzywinski, M., & Altman, N. (2017). Principal component analysis. *Nature Methods*, 14(7), 641–642. https://doi.org/10.1038/nmeth.4346
 
-As três abordagens não supervisionadas aplicadas — PCA, MDS e clustering hierárquico — convergem para a mesma conclusão: existe uma separação clara entre amostras tumorais e normais com base nos perfis de expressão génica. Esta separação é consistente com os resultados da análise de expressão diferencial (secção 7), onde foram identificados múltiplos genes com expressão significativamente alterada entre os dois grupos. A concordância entre métodos distintos reforça a robustez dos resultados e a relevância biológica das diferenças encontradas.
+Love, M. I., Huber, W., & Anders, S. (2014). Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2. *Genome Biology*, 15(12), 550. https://doi.org/10.1186/s13059-014-0550-8
+
+Orlopp, K., Richard, A. L., Saunders, C. N., & Hollenhorst, P. C. (2022). The ETS transcription factor ETV4 is a target of BRAF/MAPK signaling and promotes invasion in papillary thyroid cancer. *Molecular Oncology*, 16(12), 2391–2407. https://doi.org/10.1002/1878-0261.13210
