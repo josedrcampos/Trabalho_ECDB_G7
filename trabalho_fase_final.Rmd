@@ -308,7 +308,7 @@ top_genes <- rownames(res)[order(res$padj)][1:50]
 top_genes <- intersect(top_genes, rownames(expr_ml))
 
 X <- t(expr_ml[top_genes, ])
-y <- as.factor(meta$sample_type)
+y <- factor(make.names(meta$sample_type))
 ```
 
 De forma a avaliar corretamente o desempenho dos modelos, os dados foram divididos em conjuntos de treino e teste.
