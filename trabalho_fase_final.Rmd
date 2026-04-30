@@ -27,7 +27,7 @@ dados
 
 class(dados)
 ```
-#2. Carregamento e Estrutura dos Dados
+# 2. Carregamento e Estrutura dos Dados
 ## 2.1 Extração da matriz de expressão e metadados
 
 O conjunto de dados encontra-se armazenado num objeto do tipo RangedSummarizedExperiment, que integra diferentes componentes relevantes para a análise de dados de RNA-seq.
@@ -103,7 +103,7 @@ A análise exploratória revelou que os dados de expressão genética apresentam
 De forma a facilitar a análise e interpretação dos dados, foi aplicada uma transformação logarítmica aos valores de expressão.
 
 ```{r}
-expr_log <- log2(expr)
+expr_log <- log2(expr + 1)
 ```
 
 Esta transformação permite reduzir o impacto de valores extremos e tornar a distribuição dos dados mais equilibrada, facilitando a aplicação de métodos de análise subsequentes.
@@ -394,28 +394,6 @@ pred_knn <- predict(model_knn, X_test)
 
 ## 5.4 Avaliação dos modelos
 
-A avaliação dos modelos foi realizada com base na matriz de confusão e na accuracy.
-
-### Regressão logística (caret)
-
-```{r}
-table(Predicted = pred_log_caret, Actual = y_test)
-mean(pred_log_caret == y_test)
-```
-
-### kNN
-
-```{r}
-table(Predicted = pred_knn, Actual = y_test)
-mean(pred_knn == y_test)
-```
-
-A comparação dos resultados permite avaliar o desempenho relativo dos diferentes modelos na classificação das amostras.
-
-De forma geral, observa-se que os modelos apresentam elevada capacidade de discriminação entre amostras tumorais e normais, refletindo a forte separação identificada nas análises anteriores.
-
-## 5.4 Avaliação dos modelos
-
 A avaliação dos modelos foi realizada com base na matriz de confusão e em métricas de desempenho adequadas a problemas de classificação binária, nomeadamente a accuracy, a sensibilidade e a especificidade.
 
 A matriz de confusão permite identificar corretamente as classificações verdadeiras e falsas, sendo definida pelos seguintes elementos:
@@ -443,10 +421,10 @@ conf_log_manual
 ```{r} 
 accuracy_log_manual <- mean(pred_class == y_test)
 
-TP <- conf_log_manual[2,2]
-TN <- conf_log_manual[1,1]
-FP <- conf_log_manual[2,1]
-FN <- conf_log_manual[1,2]
+TP <- conf_log_manual[1,1]
+TN <- conf_log_manual[2,2]
+FP <- conf_log_manual[1,2]
+FN <- conf_log_manual[2,1]
 
 sensitivity_log_manual <- TP / (TP + FN)
 specificity_log_manual <- TN / (TN + FP)
@@ -468,10 +446,10 @@ conf_log_caret
 ```{r} 
 accuracy_log_caret <- mean(pred_log_caret == y_test)
 
-TP <- conf_log_caret[2,2]
-TN <- conf_log_caret[1,1]
-FP <- conf_log_caret[2,1]
-FN <- conf_log_caret[1,2]
+TP <- conf_log_caret[1,1]
+TN <- conf_log_caret[2,2]
+FP <- conf_log_caret[1,2]
+FN <- conf_log_caret[2,1]
 
 sensitivity_log_caret <- TP / (TP + FN)
 specificity_log_caret <- TN / (TN + FP)
@@ -493,10 +471,10 @@ conf_knn
 ```{r} 
 accuracy_knn <- mean(pred_knn == y_test)
 
-TP <- conf_knn[2,2]
-TN <- conf_knn[1,1]
-FP <- conf_knn[2,1]
-FN <- conf_knn[1,2]
+TP <- conf_knn[1,1]
+TN <- conf_knn[2,2]
+FP <- conf_knn[1,2]
+FN <- conf_knn[2,1]
 
 sensitivity_knn <- TP / (TP + FN)
 specificity_knn <- TN / (TN + FP)
